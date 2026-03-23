@@ -1,4 +1,3 @@
-
 *.iml
 .gradle
 .idea
@@ -15,3 +14,21 @@ Pods/
 *.jks
 *.gpg
 *yarn.lock
+
+# Android build artifacts
+*.apk
+*.aar
+*.ap_
+
+# VPN Configs & Caches
+*_cached.json
+*_cached.binary
+config.json
+tun2socks.yaml
+tun2socks.conf
+
+# Native build
+.externalNativeBuild
+.cxx
+obj/
+bin/

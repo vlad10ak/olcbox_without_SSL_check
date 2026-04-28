@@ -52,10 +52,14 @@ class LocationViewModel(
     var serverError by mutableStateOf<String?>(null)
         private set
 
+    var keyError by mutableStateOf<String?>(null)
+        private set
+
 
     val isFormValid: Boolean
-        get() = nameError == null && serverError == null &&
-                editingName.isNotBlank() && editingConfig.server.isNotBlank()
+        get() = nameError == null && serverError == null && keyError == null &&
+                editingName.isNotBlank() && editingConfig.id.isNotBlank() &&
+                editingConfig.key.isNotBlank()
 
 
     init {
@@ -70,8 +74,8 @@ class LocationViewModel(
             locations.clear()
 
             savedConfigs.forEach { (id, config) ->
-                val fullName = config.name.ifBlank { config.server }
-                locations.add(LocationItem(id, fullName, config))
+                val normalized = config.normalized()
+                locations.add(LocationItem(id, normalized.displayName(), normalized))
             }
 
             if (locations.isNotEmpty() && (currentSelectedId.isBlank() || locations.none { it.id == currentSelectedId })) {
@@ -115,6 +119,7 @@ class LocationViewModel(
     fun startEditing(id: String?) {
         nameError = null
         serverError = null
+        keyError = null
         isSaving = false
 
         if (id == null) {
@@ -124,8 +129,8 @@ class LocationViewModel(
         } else {
             val location = locations.find { it.id == id }
             editingId = id
-            editingConfig = location?.config ?: HysteriaConfig()
-            editingName = location?.fullName ?: ""
+            editingConfig = location?.config?.normalized() ?: HysteriaConfig()
+            editingName = editingConfig.displayName()
         }
     }
 
@@ -136,16 +141,23 @@ class LocationViewModel(
     }
 
     fun onServerChanged(value: String) {
-        editingConfig = editingConfig.copy(server = value)
+        editingConfig = editingConfig.copy(id = value)
         validateServer(value)
     }
 
     fun onSniChanged(value: String) {
-        editingConfig = editingConfig.copy(sni = value)
+        // Kept for compatibility with older callers. olcRTC locations no longer use SNI.
     }
 
     fun onPasswordChanged(value: String) {
-        editingConfig = editingConfig.copy(password = value)
+        editingConfig = editingConfig.copy(key = value)
+        validateKey(value)
+    }
+
+    fun onBypassProviderChanged(value: String) {
+        editingConfig = editingConfig.copy(
+            bypassProvider = HysteriaConfig.normalizeProvider(value)
+        )
     }
 
 
@@ -158,33 +170,32 @@ class LocationViewModel(
     }
 
     private fun validateServer(server: String) {
-        val serverRegex = "^[a-zA-Z0-9.-]+:\\d{1,5}\$".toRegex()
-
         serverError = when {
-            server.isBlank() -> "Server address cannot be empty"
-            !server.contains(":") -> "Missing port (e.g., :56000)"
-            !server.matches(serverRegex) -> "Invalid server format"
-            else -> {
-                val port = server.substringAfterLast(":").toIntOrNull()
-                if (port == null || port !in 1..65535) {
-                    "Port must be between 1 and 65535"
-                } else {
-                    null
-                }
-            }
+            server.isBlank() -> "Room ID cannot be empty"
+            server.length > 256 -> "Room ID is too long"
+            else -> null
+        }
+    }
+
+    private fun validateKey(key: String) {
+        keyError = when {
+            key.isBlank() -> "Key cannot be empty"
+            !key.matches(Regex("^[a-fA-F0-9]{64}$")) -> "Key must be 64 hex characters"
+            else -> null
         }
     }
 
     fun saveEditing(onComplete: () -> Unit) {
         validateName(editingName)
-        validateServer(editingConfig.server)
+        validateServer(editingConfig.id)
+        validateKey(editingConfig.key)
 
         if (!isFormValid || isSaving) return
 
         viewModelScope.launch {
             isSaving = true
             val id = editingId ?: "custom_${(100..999).random()}"
-            val finalConfig = editingConfig.copy(name = editingName)
+            val finalConfig = editingConfig.copy(name = editingName).normalized()
             configRepo.saveHysteriaConfig(finalConfig, id)
             configRepo.setSelectedHysteriaId(id)
             loadLocations()

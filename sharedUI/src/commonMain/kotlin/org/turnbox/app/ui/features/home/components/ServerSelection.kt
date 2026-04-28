@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.turnbox.app.data.model.HysteriaConfig
 
 data class ServerOption(
     val id: Int,
@@ -105,9 +106,9 @@ fun ServerSelectionScreen(
     onSettingsClick: () -> Unit = {},
 ) {
     val options = listOf(
-        ServerOption(1, "vk", "VK / Max", Icons.Rounded.PlayCircleOutline),
-        ServerOption(2, "yandex", "Yandex Telemost", Icons.Outlined.VideoChat),
-        ServerOption(3, "custom", "Add Custom TURN", Icons.Outlined.Dns)
+        ServerOption(1, HysteriaConfig.PROVIDER_JAZZ, "Jazz", Icons.Rounded.PlayCircleOutline),
+        ServerOption(2, HysteriaConfig.PROVIDER_TELEMOST, "Telemost", Icons.Outlined.VideoChat),
+        ServerOption(3, HysteriaConfig.PROVIDER_WB_STREAM, "WB Stream", Icons.Outlined.Dns)
     )
 
     Column(modifier = modifier.fillMaxWidth()) {

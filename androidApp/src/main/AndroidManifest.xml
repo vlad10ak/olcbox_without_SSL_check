@@ -36,11 +36,23 @@
             android:excludeFromRecents="true"
             android:exported="false" />
 
+        <receiver
+            android:name=".DebugVpnControlReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="org.turnbox.app.androidApp.DEBUG_START_VPN" />
+                <action android:name="org.turnbox.app.androidApp.DEBUG_STOP_VPN" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name="us.leaf3stones.hy2droid.proxy.Hysteria2VpnService"
             android:permission="android.permission.BIND_VPN_SERVICE"
             android:exported="false"
             android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="vpn" />
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>

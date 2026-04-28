@@ -6,6 +6,10 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.Json
 import org.turnbox.app.data.MASTER_HYSTERIA_CONFIG_FILE_NAME
 import org.turnbox.app.data.model.HysteriaConfig
@@ -30,10 +34,12 @@ class HysteriaConfigDataSourceImpl(
     override suspend fun saveHysteriaConfig(config: HysteriaConfig, id: String): Unit =
         withContext(Dispatchers.IO) {
             val hysteriaJsonFile = File(context.filesDir, "hysteria_settings_$id.json")
-            hysteriaJsonFile.writeText(json.encodeToString(HysteriaConfig.serializer(), config))
+            hysteriaJsonFile.writeText(
+                json.encodeToString(HysteriaConfig.serializer(), config.normalized())
+            )
 
             if (getSelectedHysteriaId() == id) {
-                updateVpnConfigFile(config, loadTurnConfig(getSelectedTurnType()))
+                updateVpnConfigFile(config)
             }
         }
 
@@ -43,10 +49,7 @@ class HysteriaConfigDataSourceImpl(
             val hysteriaJsonFile = File(context.filesDir, "hysteria_settings_$id.json")
             if (!hysteriaJsonFile.exists()) return@withContext HysteriaConfig()
             try {
-                return@withContext json.decodeFromString(
-                    HysteriaConfig.serializer(),
-                    hysteriaJsonFile.readText()
-                )
+                return@withContext decodeHysteriaConfig(hysteriaJsonFile.readText())
             } catch (e: Exception) {
                 e.printStackTrace()
                 return@withContext HysteriaConfig()
@@ -59,7 +62,7 @@ class HysteriaConfigDataSourceImpl(
             turnJsonFile.writeText(json.encodeToString(TurnConfig.serializer(), config))
 
             if (getSelectedTurnType() == type) {
-                updateVpnConfigFile(loadHysteriaConfig(getSelectedHysteriaId()), config)
+                updateVpnConfigFile(loadHysteriaConfig(getSelectedHysteriaId()))
             }
         }
 
@@ -95,9 +98,9 @@ class HysteriaConfigDataSourceImpl(
         }
     }
 
-    private suspend fun updateVpnConfigFile(hysteria: HysteriaConfig, turn: TurnConfig) {
+    private suspend fun updateVpnConfigFile(hysteria: HysteriaConfig) {
         val vpnConfigFile = File(context.filesDir, MASTER_HYSTERIA_CONFIG_FILE_NAME)
-        vpnConfigFile.writeText(hysteria.getFullConfig(turn))
+        vpnConfigFile.writeText(hysteria.getFullConfig())
 
         context.vpnPrefDataStore.edit {
             it[KEY_IS_VPN_CONFIG_READY] = true
@@ -124,7 +127,14 @@ class HysteriaConfigDataSourceImpl(
         context.vpnPrefDataStore.edit {
             it[KEY_SELECTED_TURN_TYPE] = type
         }
-        updateVpnConfigFile(loadHysteriaConfig(getSelectedHysteriaId()), loadTurnConfig(type))
+        val selectedId = getSelectedHysteriaId()
+        if (selectedId.isNotBlank()) {
+            val selected = loadHysteriaConfig(selectedId)
+            saveHysteriaConfig(
+                selected.copy(bypassProvider = HysteriaConfig.normalizeProvider(type)),
+                selectedId
+            )
+        }
     }
 
     override suspend fun getSelectedHysteriaId(): String {
@@ -136,7 +146,7 @@ class HysteriaConfigDataSourceImpl(
             it[KEY_SELECTED_HYSTERIA_ID] = id
         }
         if (id.isNotBlank()) {
-            updateVpnConfigFile(loadHysteriaConfig(id), loadTurnConfig(getSelectedTurnType()))
+            updateVpnConfigFile(loadHysteriaConfig(id))
         }
     }
 
@@ -149,7 +159,7 @@ class HysteriaConfigDataSourceImpl(
             files.map { file ->
                 val id = file.name.removePrefix("hysteria_settings_").removeSuffix(".json")
                 val config = try {
-                    json.decodeFromString(HysteriaConfig.serializer(), file.readText())
+                    decodeHysteriaConfig(file.readText())
                 } catch (e: Exception) {
                     HysteriaConfig()
                 }
@@ -164,5 +174,52 @@ class HysteriaConfigDataSourceImpl(
         if (getSelectedHysteriaId() == id) {
             setSelectedHysteriaId("")
         }
+    }
+
+    private suspend fun decodeHysteriaConfig(text: String): HysteriaConfig {
+        val root = json.parseToJsonElement(text).jsonObject
+        val source = root["location"]?.jsonObjectOrNull()
+            ?: root["hysteria"]?.jsonObjectOrNull()
+            ?: root
+
+        val fallbackProvider = runCatching { getSelectedTurnType() }.getOrDefault("")
+        val provider = firstNotBlank(
+            source.string("bypass_provider"),
+            source.string("bypassProvider"),
+            source.string("provider"),
+            root["turn"]?.jsonObjectOrNull()?.string("type"),
+            root.string("bypass_provider"),
+            root.string("provider"),
+            fallbackProvider
+        )
+
+        return HysteriaConfig(
+            name = firstNotBlank(source.string("name"), root.string("name")),
+            id = firstNotBlank(
+                source.string("id"),
+                source.string("room_id"),
+                source.string("server"),
+                root.string("id")
+            ),
+            key = firstNotBlank(
+                source.string("key"),
+                source.string("encryption_key"),
+                source.string("password"),
+                root.string("key")
+            ),
+            bypassProvider = provider
+        ).normalized()
+    }
+
+    private fun JsonObject.string(name: String): String? {
+        return this[name]?.jsonPrimitive?.contentOrNull
+    }
+
+    private fun kotlinx.serialization.json.JsonElement.jsonObjectOrNull(): JsonObject? {
+        return runCatching { jsonObject }.getOrNull()
+    }
+
+    private fun firstNotBlank(vararg values: String?): String {
+        return values.firstOrNull { !it.isNullOrBlank() } ?: ""
     }
 }

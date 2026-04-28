@@ -1,107 +1,81 @@
 package org.turnbox.app.data.model
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 
 @Serializable
 data class HysteriaConfig(
-    val server: String = "",
     val name: String = "",
-    val password: String = "",
-    val sni: String = "",
-    val insecure: Boolean = true
+    val id: String = "",
+    val key: String = "",
+    @SerialName("bypass_provider")
+    val bypassProvider: String = DEFAULT_BYPASS_PROVIDER
 ) {
 
-    fun getFullConfig(turn: TurnConfig): String {
-        val effectiveServer = if (turn.enabled) turn.listen else server
-        val mapper =
-            mapOf(SERVER_ADDRESS_PLACEHOLDER to effectiveServer, PASSWORD_PLACEHOLDER to password)
-        var resultingConf = HYSTERIA_CONFIG_TEXT_DATA
-        for (m in mapper) {
-            resultingConf = resultingConf.replace(m.key, m.value)
-        }
-        val sniData = if (sni.isBlank()) getSniData("") else getSniData(sni)
-        return resultingConf.replace(SNI_PLACEHOLDER, sniData)
+    fun normalized(): HysteriaConfig = copy(
+        name = name.trim(),
+        id = id.trim(),
+        key = key.trim(),
+        bypassProvider = normalizeProvider(bypassProvider)
+    )
+
+    fun isComplete(): Boolean = id.isNotBlank() && key.isNotBlank()
+
+    fun displayName(): String = name.ifBlank { id }
+
+    fun providerName(): String = providerDisplayName(bypassProvider)
+
+    fun getFullConfig(): String {
+        return toJsonConfig()
     }
 
     /**
      * Генерирует структурированный JSON конфиг для обмена (Copy/Paste)
      */
-    fun toJsonConfig(turn: TurnConfig, turnType: String = "custom"): String {
+    fun toJsonConfig(): String {
         val json = Json { prettyPrint = true }
+        val config = normalized()
         val root = buildJsonObject {
-            put("version", 1)
-            putJsonObject("hysteria") {
-                put("server", server)
-                put("name", name)
-                put("password", password)
-                put("sni", sni)
-                put("insecure", insecure)
-            }
-            putJsonObject("turn") {
-                put("type", turnType)
-                put("enabled", turn.enabled)
-                put("peer", turn.peer)
-                put("link", turn.link)
-                put("user", turn.user)
-                put("pass", turn.pass)
-                put("threads", turn.threads)
-                put("udp", turn.udp)
-                put("noDtls", turn.noDtls)
-                put("listen", turn.listen)
-            }
+            put("version", 2)
+            put("name", config.name)
+            put("id", config.id)
+            put("key", config.key)
+            put("bypass_provider", config.bypassProvider)
         }
         return json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), root)
     }
 
-    private fun getSniData(sni: String): String {
-        val sniLine = if (sni.isNotBlank()) "    sni: $sni" else ""
-        return """
-tls:
-$sniLine
-    insecure: $insecure
-        """.trimIndent()
-    }
-
     companion object {
-        private const val SERVER_ADDRESS_PLACEHOLDER = "__SERVER_ADDRESS_PLACEHOLDER__"
-        private const val PASSWORD_PLACEHOLDER = "__PASSWORD_PLACEHOLDER__"
-        private const val SNI_PLACEHOLDER = "__SNI_PLACEHOLDER__"
-        private const val HYSTERIA_CONFIG_TEXT_DATA = """
-server: $SERVER_ADDRESS_PLACEHOLDER
+        const val PROVIDER_JAZZ = "jazz"
+        const val PROVIDER_TELEMOST = "telemost"
+        const val PROVIDER_WB_STREAM = "wb_stream"
+        const val DEFAULT_BYPASS_PROVIDER = PROVIDER_WB_STREAM
 
-auth: $PASSWORD_PLACEHOLDER
+        val supportedBypassProviders = listOf(
+            PROVIDER_JAZZ,
+            PROVIDER_TELEMOST,
+            PROVIDER_WB_STREAM
+        )
 
-$SNI_PLACEHOLDER
+        fun normalizeProvider(value: String): String {
+            return when (value.trim().lowercase()) {
+                PROVIDER_JAZZ, "sberjazz", "sber_jazz" -> PROVIDER_JAZZ
+                PROVIDER_TELEMOST, "yandex", "yandex_telemost" -> PROVIDER_TELEMOST
+                PROVIDER_WB_STREAM, "wbstream", "wb-stream", "wildberries" -> PROVIDER_WB_STREAM
+                else -> DEFAULT_BYPASS_PROVIDER
+            }
+        }
 
-bandwidth:
-  up: 100 mbps
-  down: 100 mbps
-
-socks5:
-  listen: 127.0.0.1:1080
-
-fastOpen: true
-
-http:
-  listen: 127.0.0.1:1081
-
-acl:
-  inline:
-    - direct(domain:vk.com)
-    - direct(domain:vk-cdn.net)
-    - direct(domain:vk.me)
-    - direct(domain:yandex.ru)
-    - direct(domain:yandex.net)
-    - direct(domain:yastatic.net)
-  
-quic:
-  maxIdleTimeout: 60s 
-  keepAlivePeriod: 30s 
-  handshakeTimeout: 10s
-"""
+        fun providerDisplayName(provider: String): String {
+            return when (normalizeProvider(provider)) {
+                PROVIDER_JAZZ -> "Jazz"
+                PROVIDER_TELEMOST -> "Telemost"
+                PROVIDER_WB_STREAM -> "WB Stream"
+                else -> "WB Stream"
+            }
+        }
     }
 }

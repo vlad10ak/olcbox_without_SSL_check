@@ -24,7 +24,14 @@ interface HysteriaConfigDataSource {
 private data class ImportWrapper(
     val version: Int = 1,
     val hysteria: HysteriaSection? = null,
-    val turn: TurnSection? = null
+    val turn: TurnSection? = null,
+    val location: LocationSection? = null,
+    val name: String = "",
+    val id: String = "",
+    val key: String = "",
+    val provider: String = "",
+    val bypass_provider: String = "",
+    val bypassProvider: String = ""
 )
 
 @Serializable
@@ -32,8 +39,21 @@ private data class HysteriaSection(
     val server: String = "",
     val name: String = "",
     val password: String = "",
-    val sni: String = "",
-    val insecure: Boolean = true
+    val id: String = "",
+    val key: String = "",
+    val provider: String = "",
+    val bypass_provider: String = "",
+    val bypassProvider: String = ""
+)
+
+@Serializable
+private data class LocationSection(
+    val name: String = "",
+    val id: String = "",
+    val key: String = "",
+    val provider: String = "",
+    val bypass_provider: String = "",
+    val bypassProvider: String = ""
 )
 
 @Serializable
@@ -81,36 +101,11 @@ class HysteriaConfigRepositoryImpl(
             try {
                 val wrapper = json.decodeFromString<ImportWrapper>(trimmed)
 
-                if (wrapper.hysteria != null || wrapper.turn != null) {
-                    val hConfig = HysteriaConfig(
-                        server = wrapper.hysteria?.server ?: "",
-                        name = wrapper.hysteria?.name ?: "",
-                        password = wrapper.hysteria?.password ?: "",
-                        sni = wrapper.hysteria?.sni ?: "",
-                        insecure = wrapper.hysteria?.insecure ?: true
-                    )
-                    val tConfig = TurnConfig(
-                        enabled = wrapper.turn?.enabled ?: false,
-                        peer = wrapper.turn?.peer ?: "",
-                        link = wrapper.turn?.link ?: "",
-                        user = wrapper.turn?.user ?: "",
-                        pass = wrapper.turn?.pass ?: "",
-                        threads = wrapper.turn?.threads ?: 8,
-                        udp = wrapper.turn?.udp ?: true,
-                        noDtls = wrapper.turn?.noDtls ?: false,
-                        listen = wrapper.turn?.listen ?: "127.0.0.1:9000"
-                    )
-
-                    val turnType = wrapper.turn?.type ?: "custom"
-
-                    val baseId = hConfig.name.ifBlank { hConfig.server.take(10) }
-                    val newId = "Imported_$baseId"
-
-                    dataSource.saveHysteriaConfig(hConfig, newId)
+                val config = wrapper.toHysteriaConfig()
+                if (config.isComplete()) {
+                    val newId = "imported_${config.storageSlug()}"
+                    dataSource.saveHysteriaConfig(config, newId)
                     dataSource.setSelectedHysteriaId(newId)
-
-                    dataSource.saveTurnConfig(tConfig, turnType)
-                    dataSource.setSelectedTurnType(turnType)
                     return
                 }
             } catch (e: Exception) {
@@ -142,5 +137,43 @@ class HysteriaConfigRepositoryImpl(
 
     override suspend fun deleteHysteriaConfig(id: String) {
         dataSource.deleteHysteriaConfig(id)
+    }
+
+    private fun ImportWrapper.toHysteriaConfig(): HysteriaConfig {
+        val section = location
+        val legacy = hysteria
+        val provider = firstNotBlank(
+            section?.bypass_provider,
+            section?.bypassProvider,
+            section?.provider,
+            legacy?.bypass_provider,
+            legacy?.bypassProvider,
+            legacy?.provider,
+            bypass_provider,
+            bypassProvider,
+            this.provider,
+            turn?.type
+        )
+
+        return HysteriaConfig(
+            name = firstNotBlank(section?.name, legacy?.name, name),
+            id = firstNotBlank(section?.id, legacy?.id, legacy?.server, id),
+            key = firstNotBlank(section?.key, legacy?.key, legacy?.password, key),
+            bypassProvider = provider
+        ).normalized()
+    }
+
+    private fun firstNotBlank(vararg values: String?): String {
+        return values.firstOrNull { !it.isNullOrBlank() } ?: ""
+    }
+
+    private fun HysteriaConfig.storageSlug(): String {
+        val source = displayName().ifBlank { id }.ifBlank { "location" }
+        return source
+            .lowercase()
+            .replace(Regex("[^a-z0-9_-]+"), "_")
+            .trim('_')
+            .take(32)
+            .ifBlank { "location" }
     }
 }

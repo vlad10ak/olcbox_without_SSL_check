@@ -11,7 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -78,7 +78,7 @@ fun LogsContent(
 
     LaunchedEffect(logs.size) {
         if (logs.isNotEmpty()) {
-            listState.animateScrollToItem(logs.size - 1)
+            listState.scrollToItem(logs.lastIndex)
         }
     }
 
@@ -121,7 +121,10 @@ fun LogsContent(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(12.dp)
             ) {
-                items(logs) { log ->
+                itemsIndexed(
+                    items = logs,
+                    key = { index, log -> "$index:$log" }
+                ) { _, log ->
                     Text(
                         text = log,
                         fontSize = 12.sp,

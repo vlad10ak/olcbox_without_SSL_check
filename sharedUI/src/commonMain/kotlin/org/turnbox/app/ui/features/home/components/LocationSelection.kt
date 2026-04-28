@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -13,12 +14,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -26,18 +26,20 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.turnbox.app.ui.features.locations.LocationItem
+import org.turnbox.app.ui.features.locations.PingsState
 import org.turnbox.app.ui.features.locations.components.LocationRow
+import org.turnbox.app.ui.features.locations.components.RefreshButton
 
 @Composable
 fun LocationSelectorScreen(
     modifier: Modifier = Modifier,
     onRefreshClick: () -> Unit,
-    onSelectorClick: () -> Unit,
     onAddLocationClick: () -> Unit,
-    item: LocationItem?,
-    pingMs: Int? = null,
-    isError: Boolean = false,
-    isLoading: Boolean = false
+    locations: List<LocationItem>,
+    selectedLocationId: String?,
+    pingsState: PingsState,
+    onLocationSelected: (String) -> Unit,
+    onLocationSettingsClick: (String) -> Unit
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
         Row(
@@ -54,28 +56,14 @@ fun LocationSelectorScreen(
                 Spacer(Modifier.width(8.dp))
                 Text("LOCATION", fontWeight = FontWeight.Medium, fontSize = 14.sp)
             }
-            TextButton(onClick = onRefreshClick, enabled = !isLoading) {
-                Icon(
-                    Icons.Rounded.Refresh,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(Modifier.width(8.dp))
-                Text("Refresh")
-            }
+            RefreshButton(
+                state = pingsState,
+                onClick = onRefreshClick,
+                tint = MaterialTheme.colorScheme.primary
+            )
         }
 
-        if (item != null) {
-            LocationRow(
-                item,
-                isSelected = true,
-                isLoading = isLoading,
-                isError = isError,
-                settingsEnabled = false,
-                onClick = onSelectorClick,
-                pingMs = pingMs
-            )
-        } else {
+        if (locations.isEmpty()) {
             Surface(
                 onClick = onAddLocationClick,
                 shape = RoundedCornerShape(16.dp),
@@ -100,6 +88,38 @@ fun LocationSelectorScreen(
                         fontWeight = FontWeight.Medium
                     )
                 }
+            }
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                locations.forEach { location ->
+                    val pingMs = (pingsState as? PingsState.Success)?.pings?.get(location.id)
+                        ?: (pingsState as? PingsState.Loading)?.lastPings?.get(location.id)
+                    val isOffline = pingsState is PingsState.Success && pingMs == null
+
+                    LocationRow(
+                        location = location,
+                        isSelected = selectedLocationId == location.id,
+                        isLoading = pingsState is PingsState.Loading,
+                        isError = isOffline,
+                        pingMs = pingMs,
+                        onSettingsClick = { onLocationSettingsClick(location.id) },
+                        onClick = { onLocationSelected(location.id) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            FilledTonalButton(
+                onClick = onAddLocationClick,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Icon(Icons.Rounded.Add, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text("Add Custom Location", fontSize = 16.sp, fontWeight = FontWeight.Medium)
             }
         }
 

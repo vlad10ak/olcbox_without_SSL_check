@@ -27,12 +27,8 @@ import org.turnbox.app.ui.features.home.components.HomeScreenAppBar
 import org.turnbox.app.ui.features.home.components.LocationSelectorScreen
 import org.turnbox.app.ui.features.home.components.LogsSheet
 import org.turnbox.app.ui.features.home.components.RelayStatus
-import org.turnbox.app.ui.features.home.components.ServerSelectionScreen
-import org.turnbox.app.ui.features.locations.LocationSelectionSheet
 import org.turnbox.app.ui.features.locations.LocationSettingsSheet
 import org.turnbox.app.ui.features.locations.LocationViewModel
-import org.turnbox.app.ui.features.locations.PingsState
-import org.turnbox.app.ui.features.turn.CustomTurnSheet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,9 +41,7 @@ fun HomeScreen(
     onCopyConfigRequested: () -> Unit = { viewModel.onCopyFullConfigClicked() }
 ) {
     val scrollState = rememberScrollState()
-    var isLocationSheetOpen by remember { mutableStateOf(false) }
     var isLocationSettingsOpen by remember { mutableStateOf(false) }
-    var isTurnSheetOpen by remember { mutableStateOf(false) }
     var isLogsSheetOpen by remember { mutableStateOf(false) }
 
     val state by viewModel.state.collectAsState()
@@ -55,12 +49,6 @@ fun HomeScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val pingsState = locationViewModel.pingsState
-    val currentPingMs = (pingsState as? PingsState.Success)?.pings?.get(state.selectedLocation?.id)
-        ?: (pingsState as? PingsState.Loading)?.lastPings?.get(state.selectedLocation?.id)
-
-    val isCurrentOffline = pingsState is PingsState.Success &&
-            state.selectedLocation != null &&
-            pingsState.pings[state.selectedLocation?.id] == null
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -105,39 +93,26 @@ fun HomeScreen(
                         locationViewModel.refreshPings { viewModel.checkConnectionFor(it) }
                     }
                 },
-                onSelectorClick = { isLocationSheetOpen = true },
-                item = state.selectedLocation,
-                pingMs = currentPingMs,
-                isError = isCurrentOffline,
-                isLoading = pingsState is PingsState.Loading,
+                locations = locationViewModel.locations,
+                selectedLocationId = locationViewModel.selectedLocationId,
+                pingsState = pingsState,
+                onLocationSelected = { id ->
+                    locationViewModel.selectLocation(id) {
+                        viewModel.loadCurrentConfig()
+                    }
+                },
+                onLocationSettingsClick = { id ->
+                    locationViewModel.startEditing(id)
+                    isLocationSettingsOpen = true
+                },
                 onAddLocationClick = {
                     locationViewModel.startEditing(null)
                     isLocationSettingsOpen = true
                 }
             )
             Spacer(
-                modifier = Modifier.height(12.dp)
+                modifier = Modifier.height(24.dp)
             )
-            ServerSelectionScreen(
-                selectedType = state.selectedTurnType,
-                onOptionSelected = { option ->
-                    viewModel.onServerOptionSelected(option.id)
-                },
-                onSettingsClick = {
-                    isTurnSheetOpen = true
-                }
-            )
-
-            if (isLocationSheetOpen) {
-                LocationSelectionSheet(
-                    onDismiss = {
-                        isLocationSheetOpen = false
-                        viewModel.loadCurrentConfig()
-                    },
-                    viewModel = locationViewModel,
-                    homeViewModel = viewModel
-                )
-            }
 
             if (isLocationSettingsOpen) {
                 LocationSettingsSheet(
@@ -150,16 +125,10 @@ fun HomeScreen(
                 )
             }
 
-            if (isTurnSheetOpen) {
-                CustomTurnSheet(
-                    viewModel = viewModel,
-                    onDismiss = { isTurnSheetOpen = false }
-                )
-            }
-
             if (isLogsSheetOpen) {
+                val logs by viewModel.logs.collectAsState()
                 LogsSheet(
-                    logs = state.logs,
+                    logs = logs,
                     onDismiss = { isLogsSheetOpen = false }
                 )
             }

@@ -3,7 +3,7 @@ package org.turnbox.app.ui.features.locations.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -25,10 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import org.turnbox.app.data.model.HysteriaConfig
 import org.turnbox.app.ui.features.locations.LocationItem
-import org.turnbox.app.ui.theme.shimmerEffect
 import org.turnbox.app.util.parseEmojiAndName
 
 @Composable
@@ -54,7 +55,7 @@ fun LocationRow(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .fillMaxWidth()
-            .height(64.dp)
+            .height(76.dp)
             .clip(RoundedCornerShape(16.dp))
             .background(bgColor)
             .border(1.dp, borderColor, RoundedCornerShape(16.dp))
@@ -66,13 +67,25 @@ fun LocationRow(
             Spacer(modifier = Modifier.width(8.dp))
         }
 
-        Text(
-            text = cleanName,
-            color = textColor,
-            fontSize = 16.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = cleanName,
+                color = textColor,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
+
+            val providerName = location.config?.providerName()
+                ?: HysteriaConfig.providerDisplayName(HysteriaConfig.DEFAULT_BYPASS_PROVIDER)
+            val roomId = location.config?.id.orEmpty()
+            Text(
+                text = if (roomId.isBlank()) providerName else "$providerName · $roomId",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 12.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
         if (settingsEnabled) {
             IconButton(
                 onClick = onSettingsClick,
@@ -87,34 +100,32 @@ fun LocationRow(
         }
 
 
-        Box(contentAlignment = Alignment.Center) {
-            when {
-                isLoading -> {
-                    Box(
-                        modifier = Modifier
-                            .size(width = 45.dp, height = 18.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .shimmerEffect()
-                    )
-                }
+        when {
+            isLoading -> {
+                Text(
+                    text = "Checking",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-                pingMs != null -> {
-                    Text(
-                        text = "$pingMs ms",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+            pingMs != null -> {
+                Text(
+                    text = "$pingMs ms",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
 
-                isError -> {
-                    Text(
-                        text = "Offline",
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.error
-                    )
-                }
+            isError -> {
+                Text(
+                    text = "Offline",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.error
+                )
             }
         }
 

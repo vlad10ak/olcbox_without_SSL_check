@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import org.turnbox.app.data.importer.ConfigImporter
 import org.turnbox.app.data.model.HysteriaConfig
+import org.turnbox.app.data.model.ProviderConfig
 import org.turnbox.app.data.model.TurnConfig
 import org.turnbox.app.data.repository.HysteriaConfigRepository
 import org.turnbox.app.ui.features.locations.LocationItem
@@ -18,35 +19,41 @@ class HomeScreenViewModel(
     private val configRepo: HysteriaConfigRepository,
     private val configImporter: ConfigImporter
 ) : ViewModel() {
-    private val _state =
-        MutableStateFlow(
-            UiState(
-                false,
-                false,
-                null,
-                HysteriaConfig(),
-                TurnConfig(),
-                "custom",
-                false,
-                emptyList()
-            )
+
+    private val _state = MutableStateFlow(
+        UiState(
+            isVpnConnected = false,
+            isVpnLoading = false,
+            selectedLocation = null,
+            configData = HysteriaConfig(),
+            turnData = TurnConfig(),
+            selectedTurnType = HysteriaConfig.DEFAULT_BYPASS_PROVIDER,
+            shouldShowConfigInvalidReminder = false,
+            providers = emptyList()
         )
+    )
     val state get() = _state.asStateFlow()
+    val logs get() = vpnManager.logs
 
     init {
+        loadProviders()
         loadCurrentConfig()
-
-        viewModelScope.launch {
-            vpnManager.logs.collect { logs ->
-                _state.update { it.copy(logs = logs) }
-            }
-        }
 
         viewModelScope.launch {
             vpnManager.isConnected.collect { connected ->
                 _state.update { it.copy(isVpnConnected = connected, isVpnLoading = false) }
             }
         }
+    }
+
+    private fun loadProviders() {
+        val hardcodedProviders = listOf(
+            ProviderConfig(id = 1, code = HysteriaConfig.PROVIDER_JAZZ, name = "Jazz"),
+            ProviderConfig(id = 2, code = HysteriaConfig.PROVIDER_TELEMOST, name = "Telemost"),
+            ProviderConfig(id = 3, code = HysteriaConfig.PROVIDER_WB_STREAM, name = "WB Stream")
+        )
+
+        _state.update { it.copy(providers = hardcodedProviders) }
     }
 
     fun loadCurrentConfig() {
@@ -58,17 +65,14 @@ class HomeScreenViewModel(
             }
 
             val savedHysteria = configRepo.loadHysteriaConfig(selectedId)
-            val selectedType = configRepo.getSelectedTurnType()
-            val savedTurn = configRepo.loadTurnConfig(selectedType)
+            val normalized = savedHysteria.normalized()
 
-            val fullName = savedHysteria.name.ifBlank { savedHysteria.server }
-            val locationItem = LocationItem(selectedId, fullName, savedHysteria)
+            val locationItem = LocationItem(selectedId, normalized.displayName(), normalized)
 
             _state.update {
                 it.copy(
-                    configData = savedHysteria,
-                    turnData = savedTurn,
-                    selectedTurnType = selectedType,
+                    configData = normalized,
+                    selectedTurnType = normalized.bypassProvider,
                     selectedLocation = locationItem
                 )
             }
@@ -76,15 +80,15 @@ class HomeScreenViewModel(
     }
 
     suspend fun performPing(): Long? {
-        return vpnManager.ping(_state.value.turnData, _state.value.configData)
+        return vpnManager.ping(_state.value.configData)
     }
 
     suspend fun performPingFor(config: HysteriaConfig): Long? {
-        return vpnManager.ping(_state.value.turnData, config)
+        return vpnManager.ping(config)
     }
 
     suspend fun checkConnectionFor(config: HysteriaConfig): Long? {
-        return vpnManager.checkConnection(_state.value.turnData, config)
+        return vpnManager.checkConnection(config)
     }
 
     fun startVpnContinuation() {
@@ -104,7 +108,6 @@ class HomeScreenViewModel(
                     if (selectedId.isNotBlank()) {
                         configRepo.saveHysteriaConfig(state.value.configData, selectedId)
                     }
-                    configRepo.saveTurnConfig(state.value.turnData, state.value.selectedTurnType)
                     vpnManager.startVpn()
                 }
             } catch (e: Exception) {
@@ -114,30 +117,29 @@ class HomeScreenViewModel(
     }
 
     fun onServerOptionSelected(id: Int) {
-        val newType = when (id) {
-            1 -> "vk"
-            2 -> "yandex"
-            3 -> "custom"
-            else -> return
-        }
+        val provider = _state.value.providers.find { it.id == id } ?: return
+        val newType = HysteriaConfig.normalizeProvider(provider.code)
 
         viewModelScope.launch {
-            configRepo.saveTurnConfig(_state.value.turnData, _state.value.selectedTurnType)
-            configRepo.setSelectedTurnType(newType)
-            val newTurnConfig = configRepo.loadTurnConfig(newType)
+            val updatedConfig = _state.value.configData.copy(bypassProvider = newType).normalized()
+            val selectedId = configRepo.getSelectedHysteriaId()
+            if (selectedId.isNotBlank()) {
+                configRepo.saveHysteriaConfig(updatedConfig, selectedId)
+            }
 
             _state.update {
                 it.copy(
                     selectedTurnType = newType,
-                    turnData = newTurnConfig
+                    configData = updatedConfig,
+                    selectedLocation = it.selectedLocation?.copy(config = updatedConfig)
                 )
             }
         }
     }
 
-    fun onServerChanged(value: String) = updateHysteriaConfig { it.copy(server = value) }
-    fun onPasswordChanged(value: String) = updateHysteriaConfig { it.copy(password = value) }
-    fun onSniChanged(value: String) = updateHysteriaConfig { it.copy(sni = value) }
+    fun onServerChanged(value: String) = updateHysteriaConfig { it.copy(id = value) }
+    fun onPasswordChanged(value: String) = updateHysteriaConfig { it.copy(key = value) }
+    fun onSniChanged(value: String) = Unit
 
     fun onTurnEnabledChanged(value: Boolean) = updateTurnConfig { it.copy(enabled = value) }
     fun onTurnPeerChanged(value: String) = updateTurnConfig { it.copy(peer = value) }
@@ -165,7 +167,6 @@ class HomeScreenViewModel(
                 if (selectedId.isNotBlank()) {
                     configRepo.saveHysteriaConfig(_state.value.configData, selectedId)
                 }
-                configRepo.saveTurnConfig(_state.value.turnData, _state.value.selectedTurnType)
             }
         } else {
             _state.update { it.copy(shouldShowConfigInvalidReminder = true) }
@@ -177,8 +178,7 @@ class HomeScreenViewModel(
     }
 
     fun onCopyFullConfigClicked() {
-        val fullData =
-            state.value.configData.toJsonConfig(state.value.turnData, state.value.selectedTurnType)
+        val fullData = state.value.configData.toJsonConfig()
         configImporter.copyToClipboard(fullData)
     }
 
@@ -197,20 +197,7 @@ class HomeScreenViewModel(
     }
 
     private fun isUserConfigValid(): Boolean {
-        val hConfig = _state.value.configData
-        val tConfig = _state.value.turnData
-        val type = _state.value.selectedTurnType
-
-        if (tConfig.enabled) {
-            val isPeerValid = tConfig.peer.isNotBlank()
-            val isDataValid = if (type == "custom") {
-                tConfig.user.isNotBlank() && tConfig.pass.isNotBlank()
-            } else {
-                tConfig.link.isNotBlank()
-            }
-            return isPeerValid && isDataValid && hConfig.password.isNotBlank()
-        }
-        return hConfig.server.isNotBlank() && hConfig.password.isNotBlank()
+        return _state.value.configData.isComplete()
     }
 
     fun onRawConfigImported(rawText: String) {
@@ -242,5 +229,5 @@ data class UiState(
     val turnData: TurnConfig,
     val selectedTurnType: String,
     val shouldShowConfigInvalidReminder: Boolean,
-    val logs: List<String> = emptyList()
+    val providers: List<ProviderConfig> = emptyList()
 )

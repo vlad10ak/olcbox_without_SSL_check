@@ -1,6 +1,7 @@
 package org.turnbox.app.ui.features.locations
 
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -29,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import org.turnbox.app.data.model.HysteriaConfig
 import org.turnbox.app.ui.components.PingButton
 import org.turnbox.app.ui.features.home.HomeScreenViewModel
 
@@ -108,8 +111,10 @@ fun LocationSettingsContent(
             value = name,
             onValueChange = { viewModel.onNameChanged(it) },
             label = { Text("Name") },
-            placeholder = { Text("Helsinki, FI") },
+            placeholder = { Text("WB backup") },
             enabled = !isSaving,
+            isError = viewModel.nameError != null,
+            supportingText = viewModel.nameError?.let { { Text(it) } },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             modifier = Modifier.fillMaxWidth(),
             trailingIcon = {
@@ -123,16 +128,26 @@ fun LocationSettingsContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        OutlinedTextField(
-            value = config.server,
-            onValueChange = { viewModel.onServerChanged(it) },
-            label = { Text("TURN Client Address") },
-            placeholder = { Text("95.85.240.113:56000") },
+        BypassProviderPicker(
+            selectedProvider = config.bypassProvider,
             enabled = !isSaving,
+            onProviderSelected = viewModel::onBypassProviderChanged
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        OutlinedTextField(
+            value = config.id,
+            onValueChange = { viewModel.onServerChanged(it) },
+            label = { Text("Room ID") },
+            placeholder = { Text(roomIdPlaceholder(config.bypassProvider)) },
+            enabled = !isSaving,
+            isError = viewModel.serverError != null,
+            supportingText = viewModel.serverError?.let { { Text(it) } },
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
             modifier = Modifier.fillMaxWidth(),
             trailingIcon = {
-                if (config.server.isNotEmpty() && !isSaving) {
+                if (config.id.isNotEmpty() && !isSaving) {
                     IconButton(onClick = { viewModel.onServerChanged("") }) {
                         Icon(Icons.Default.Close, contentDescription = "Clear")
                     }
@@ -142,49 +157,31 @@ fun LocationSettingsContent(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        Row(modifier = Modifier.fillMaxWidth()) {
-            OutlinedTextField(
-                value = config.sni,
-                onValueChange = { viewModel.onSniChanged(it) },
-                label = { Text("SNI") },
-                placeholder = { Text("localhost") },
-                modifier = Modifier.weight(1f),
-                enabled = !isSaving,
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
-                trailingIcon = {
-                    if (config.sni.isNotEmpty() && !isSaving) {
-                        IconButton(onClick = { viewModel.onSniChanged("") }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear")
-                        }
+        OutlinedTextField(
+            value = config.key,
+            onValueChange = { viewModel.onPasswordChanged(it) },
+            label = { Text("Encryption Key") },
+            placeholder = { Text("64 hex characters") },
+            maxLines = 1,
+            enabled = !isSaving,
+            isError = viewModel.keyError != null,
+            supportingText = viewModel.keyError?.let { { Text(it) } },
+            visualTransformation = PasswordVisualTransformation(),
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+            keyboardActions = KeyboardActions(
+                onDone = {
+                    focusManager.clearFocus()
+                }
+            ),
+            modifier = Modifier.fillMaxWidth(),
+            trailingIcon = {
+                if (config.key.isNotEmpty() && !isSaving) {
+                    IconButton(onClick = { viewModel.onPasswordChanged("") }) {
+                        Icon(Icons.Default.Close, contentDescription = "Clear")
                     }
                 }
-            )
-
-            Spacer(modifier = Modifier.width(16.dp))
-
-            OutlinedTextField(
-                value = config.password,
-                onValueChange = { viewModel.onPasswordChanged(it) },
-                label = { Text("Password") },
-                maxLines = 1,
-                enabled = !isSaving,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        focusManager.clearFocus()
-                    }
-                ),
-                modifier = Modifier.weight(1f),
-                trailingIcon = {
-                    if (config.password.isNotEmpty() && !isSaving) {
-                        IconButton(onClick = { viewModel.onPasswordChanged("") }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear")
-                        }
-                    }
-                }
-            )
-        }
+            }
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -224,7 +221,7 @@ fun LocationSettingsContent(
                 modifier = Modifier
                     .weight(1f)
                     .height(56.dp),
-                enabled = !isSaving,
+                enabled = !isSaving && viewModel.isFormValid,
                 shape = RoundedCornerShape(28.dp)
             ) {
                 if (isSaving) {
@@ -240,5 +237,88 @@ fun LocationSettingsContent(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun BypassProviderPicker(
+    selectedProvider: String,
+    enabled: Boolean,
+    onProviderSelected: (String) -> Unit
+) {
+    val selected = HysteriaConfig.normalizeProvider(selectedProvider)
+    val options = HysteriaConfig.supportedBypassProviders
+
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Text(
+            text = "Bypass Provider",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            options.forEach { provider ->
+                val isSelected = selected == provider
+                val container = if (isSelected) {
+                    MaterialTheme.colorScheme.secondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainer
+                }
+                val border = if (isSelected) {
+                    MaterialTheme.colorScheme.outline
+                } else {
+                    MaterialTheme.colorScheme.outlineVariant
+                }
+
+                Surface(
+                    onClick = { if (enabled) onProviderSelected(provider) },
+                    enabled = enabled,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(46.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    color = container,
+                    border = BorderStroke(1.dp, border)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = HysteriaConfig.providerDisplayName(provider),
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        if (isSelected) {
+                            Icon(
+                                imageVector = Icons.Rounded.Check,
+                                contentDescription = "Selected",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun roomIdPlaceholder(provider: String): String {
+    return when (HysteriaConfig.normalizeProvider(provider)) {
+        HysteriaConfig.PROVIDER_TELEMOST -> "12345678901234"
+        HysteriaConfig.PROVIDER_JAZZ -> "room id or any"
+        HysteriaConfig.PROVIDER_WB_STREAM -> "019daab6-e133-7a92-a03a-83861d304d33"
+        else -> "room id"
     }
 }

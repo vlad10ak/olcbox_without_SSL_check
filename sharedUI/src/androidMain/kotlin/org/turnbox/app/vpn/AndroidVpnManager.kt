@@ -3,15 +3,20 @@ package org.turnbox.app.vpn
 import android.content.Context
 import android.content.Intent
 import android.net.VpnService
+import android.os.Build
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import mobile.Mobile
 import org.turnbox.app.data.model.HysteriaConfig
-import org.turnbox.app.data.model.TurnConfig
 import us.leaf3stones.hy2droid.proxy.Hysteria2VpnService
-import java.io.BufferedReader
-import java.io.File
-import java.io.InputStreamReader
+import java.io.DataInputStream
+import java.io.DataOutputStream
+import java.net.InetSocketAddress
+import java.net.Socket
 
 class AndroidVpnManager(private val context: Context) : VpnManager {
     override val logs: StateFlow<List<String>> = Hysteria2VpnService.logs
@@ -23,7 +28,11 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
         val intent = Intent(context, Hysteria2VpnService::class.java).apply {
             action = Hysteria2VpnService.ACTION_START_VPN
         }
-        context.startService(intent)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            ContextCompat.startForegroundService(context, intent)
+        } else {
+            context.startService(intent)
+        }
     }
 
     override fun stopVpn() {
@@ -33,128 +42,96 @@ class AndroidVpnManager(private val context: Context) : VpnManager {
         context.startService(intent)
     }
 
-    override suspend fun ping(turnConfig: TurnConfig, hysteriaConfig: HysteriaConfig): Long? =
+    override suspend fun ping(hysteriaConfig: HysteriaConfig): Long? {
+        return checkConnection(hysteriaConfig)
+    }
+
+    override suspend fun checkConnection(hysteriaConfig: HysteriaConfig): Long? =
         withContext(Dispatchers.IO) {
-            val pingId = (0..999).random()
-            val server = hysteriaConfig.server
-            val randomPort = (30001..40000).random()
-            
-            val cmd = mutableListOf<String>().apply {
-                add(File(context.applicationInfo.nativeLibraryDir, "libvkturn.so").absolutePath)
-                add("-peer"); add(server)
-                if (turnConfig.enabled) {
-                    if (turnConfig.link.isNotBlank()) {
-                        add(if (turnConfig.link.contains("yandex")) "-yandex-link" else "-vk-link")
-                        add(turnConfig.link)
-                    } else if (turnConfig.user.isNotBlank() && turnConfig.pass.isNotBlank()) {
-                        add("-turn-server"); add(turnConfig.peer.ifBlank { "turn:relay.turnbox.org:3478" })
-                        add("-turn-user"); add(turnConfig.user)
-                        add("-turn-pass"); add(turnConfig.pass)
-                    }
-                }
-                add("-ping")
-                add("-ping-count"); add("1")
-                add("-ping-timeout"); add("3s")
-                add("-listen"); add("127.0.0.1:$randomPort")
-            }
+            connectionCheckMutex.withLock {
+                val config = hysteriaConfig.normalized()
+                if (!config.isComplete()) return@withLock null
 
-            try {
-                val process = ProcessBuilder(cmd).redirectErrorStream(true).start()
-                val reader = BufferedReader(InputStreamReader(process.inputStream))
-                var line: String?
-                var rtt: Long? = null
-
-                while (reader.readLine().also { line = it } != null) {
-                    val match = Regex("time=([\\d.]+)ms").find(line ?: "")
-                    if (match != null) {
-                        val rttStr = match.groupValues[1]
-                        rtt = rttStr.toDoubleOrNull()?.toLong()
-                    }
+                if (Hysteria2VpnService.isConnected.value || Mobile.isRunning()) {
+                    return@withLock 1L
                 }
 
-                process.waitFor()
-                return@withContext rtt
-            } catch (e: Exception) {
-                null
-            }
-        }
-
-    override suspend fun checkConnection(turnConfig: TurnConfig, hysteriaConfig: HysteriaConfig): Long? =
-        withContext(Dispatchers.IO) {
-            val checkId = (0..999).random()
-            val server = hysteriaConfig.server
-            
-            var turnProcess: Process? = null
-            val hysteriaConfigPath = File(context.cacheDir, "temp_check_$checkId.yaml").absolutePath
-            
-            try {
-                val turnListen = "127.0.0.1:${(10000..20000).random()}"
-                if (turnConfig.enabled) {
-                    val turnCmd = mutableListOf<String>().apply {
-                        add(File(context.applicationInfo.nativeLibraryDir, "libvkturn.so").absolutePath)
-                        add("-peer"); add(server)
-                        if (turnConfig.link.isNotBlank()) {
-                            add(if (turnConfig.link.contains("yandex")) "-yandex-link" else "-vk-link")
-                            add(turnConfig.link)
-                        }
-                        add("-listen"); add(turnListen)
-                        add("-n"); add("1")
-                    }
-                    turnProcess = ProcessBuilder(turnCmd).start()
-                }
-
-                val effectiveServer = if (turnConfig.enabled) turnListen else server
                 val socksPort = (20001..30000).random()
-                val configContent = """
-                    server: $effectiveServer
-                    auth: ${hysteriaConfig.password}
-                    tls:
-                      sni: ${hysteriaConfig.sni.ifBlank { server.substringBefore(":") }}
-                      insecure: ${hysteriaConfig.insecure}
-                    socks5:
-                      listen: 127.0.0.1:$socksPort
-                    quic:
-                      handshakeTimeout: 3s
-                """.trimIndent()
-                File(hysteriaConfigPath).writeText(configContent)
+                val startedAt = System.currentTimeMillis()
 
-                val hysteriaCmd = listOf(
-                    File(context.applicationInfo.nativeLibraryDir, "libhysteria.so").absolutePath,
-                    "-c", hysteriaConfigPath
-                )
-                
-                val hysteriaProcess = ProcessBuilder(hysteriaCmd).redirectErrorStream(true).start()
-                
-                val startTime = System.currentTimeMillis()
-                var connected = false
-                var latency: Long? = null
-                
-                val reader = BufferedReader(InputStreamReader(hysteriaProcess.inputStream))
-                
-                val timeout = 4000L
-                while (System.currentTimeMillis() - startTime < timeout) {
-                    if (reader.ready()) {
-                        val line = reader.readLine() ?: break
-                        if (line.contains("connected")) {
-                            connected = true
-                            latency = System.currentTimeMillis() - startTime
-                            break
-                        }
+                try {
+                    Mobile.setProviders()
+                    Mobile.start(
+                        config.bypassProvider,
+                        config.id,
+                        config.key,
+                        socksPort.toLong(),
+                        "",
+                        ""
+                    )
+                    Mobile.waitReady(CONNECTION_CHECK_TIMEOUT_MS)
+                    if (probeSocksConnect(socksPort)) {
+                        System.currentTimeMillis() - startedAt
                     } else {
-                        Thread.sleep(100)
+                        null
                     }
+                } catch (_: Exception) {
+                    null
+                } finally {
+                    runCatching { Mobile.stop() }
                 }
-
-                hysteriaProcess.destroy()
-                turnProcess?.destroy()
-                File(hysteriaConfigPath).delete()
-
-                return@withContext if (connected) latency ?: 1L else null
-
-            } catch (e: Exception) {
-                turnProcess?.destroy()
-                File(hysteriaConfigPath).delete()
-                null
             }
         }
+
+    private fun probeSocksConnect(socksPort: Int): Boolean {
+        Socket().use { socket ->
+            socket.connect(InetSocketAddress("127.0.0.1", socksPort), SOCKS_PROBE_TIMEOUT_MS)
+            socket.soTimeout = SOCKS_PROBE_TIMEOUT_MS
+
+            val input = DataInputStream(socket.getInputStream())
+            val output = DataOutputStream(socket.getOutputStream())
+
+            output.write(byteArrayOf(0x05, 0x01, 0x00))
+            output.flush()
+
+            if (input.readUnsignedByte() != 0x05) return false
+            if (input.readUnsignedByte() == 0xFF) return false
+
+            val host = SOCKS_PROBE_HOST.encodeToByteArray()
+            output.write(byteArrayOf(0x05, 0x01, 0x00, 0x03, host.size.toByte()))
+            output.write(host)
+            output.writeShort(SOCKS_PROBE_PORT)
+            output.flush()
+
+            if (input.readUnsignedByte() != 0x05) return false
+            if (input.readUnsignedByte() != 0x00) return false
+            input.readUnsignedByte()
+
+            when (input.readUnsignedByte()) {
+                0x01 -> input.skipFully(4)
+                0x03 -> input.skipFully(input.readUnsignedByte())
+                0x04 -> input.skipFully(16)
+                else -> return false
+            }
+            input.skipFully(2)
+            return true
+        }
+    }
+
+    private fun DataInputStream.skipFully(byteCount: Int) {
+        var remaining = byteCount
+        while (remaining > 0) {
+            val skipped = skipBytes(remaining)
+            if (skipped <= 0) throw java.io.EOFException()
+            remaining -= skipped
+        }
+    }
+
+    private companion object {
+        const val CONNECTION_CHECK_TIMEOUT_MS = 8_000L
+        const val SOCKS_PROBE_TIMEOUT_MS = 5_000
+        const val SOCKS_PROBE_HOST = "example.com"
+        const val SOCKS_PROBE_PORT = 443
+        val connectionCheckMutex = Mutex()
+    }
 }

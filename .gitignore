@@ -32,3 +32,5 @@ tun2socks.conf
 .cxx
 obj/
 bin/
+keystore.properties
+release-keystore.jks

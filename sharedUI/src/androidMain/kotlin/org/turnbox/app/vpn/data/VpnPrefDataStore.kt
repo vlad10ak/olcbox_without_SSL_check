@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 
@@ -13,3 +14,6 @@ val KEY_VPN_CONFIG_PATH = stringPreferencesKey("vpn_config_path")
 val KEY_ANDROID_CONNECTION_MODE = stringPreferencesKey("android_connection_mode")
 val KEY_ANDROID_SOCKS_USERNAME = stringPreferencesKey("android_socks_username")
 val KEY_ANDROID_SOCKS_PASSWORD = stringPreferencesKey("android_socks_password")
+val KEY_ANDROID_SPLIT_TUNNEL_MODE = stringPreferencesKey("android_split_tunnel_mode")
+val KEY_ANDROID_SPLIT_TUNNEL_PROXY_APPS = stringSetPreferencesKey("android_split_tunnel_proxy_apps")
+val KEY_ANDROID_SPLIT_TUNNEL_BYPASS_APPS = stringSetPreferencesKey("android_split_tunnel_bypass_apps")

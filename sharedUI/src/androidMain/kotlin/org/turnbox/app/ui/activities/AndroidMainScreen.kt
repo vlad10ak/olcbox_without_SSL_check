@@ -17,6 +17,8 @@ import org.turnbox.app.ui.TurnboxAppContent
 import org.turnbox.app.ui.features.home.HomeScreenViewModel
 import org.turnbox.app.ui.features.locations.LocationViewModel
 import org.turnbox.app.vpn.AndroidConnectionMode
+import org.turnbox.app.vpn.AndroidSplitTunnelList
+import org.turnbox.app.vpn.AndroidSplitTunnelMode
 import org.turnbox.app.vpn.AndroidVpnManager
 
 @Composable
@@ -28,6 +30,8 @@ fun AndroidMainScreen(
     val context = LocalContext.current
     val connectionMode by vpnManager.connectionMode.collectAsState()
     val proxySettings by vpnManager.proxySettings.collectAsState()
+    val splitTunnelSettings by vpnManager.splitTunnelSettings.collectAsState()
+    val installedApps by vpnManager.installedApps.collectAsState()
     val homeState by viewModel.state.collectAsState()
     val pendingLogSaveCallbacks = remember {
         mutableStateOf<Pair<(String) -> Unit, (String) -> Unit>?>(null)
@@ -37,6 +41,20 @@ fun AndroidMainScreen(
     }
     var isAppSettingsOpen by remember { mutableStateOf(false) }
     var logsOpenRequest by remember { mutableStateOf(0) }
+    var splitTunnelRestartPending by remember { mutableStateOf(false) }
+
+    fun markSplitTunnelChanged() {
+        if (homeState.isVpnConnected && connectionMode == AndroidConnectionMode.Tun) {
+            splitTunnelRestartPending = true
+        }
+    }
+
+    fun applyPendingSplitTunnelRestart() {
+        if (splitTunnelRestartPending && homeState.isVpnConnected && connectionMode == AndroidConnectionMode.Tun) {
+            viewModel.restartVpnIfRunning()
+        }
+        splitTunnelRestartPending = false
+    }
 
     val vpnRequestLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -113,18 +131,25 @@ fun AndroidMainScreen(
         },
         logsOpenRequest = logsOpenRequest,
         showAppSettingsButton = true,
-        onAppSettingsClick = { isAppSettingsOpen = true }
+        onAppSettingsClick = {
+            vpnManager.refreshInstalledApps()
+            isAppSettingsOpen = true
+        }
     )
 
     if (isAppSettingsOpen) {
         AppSettingsSheet(
             selectedMode = connectionMode,
             proxySettings = proxySettings,
+            splitTunnelSettings = splitTunnelSettings,
+            installedApps = installedApps,
             enabled = !homeState.isVpnLoading,
             isConnectionActive = homeState.isVpnConnected,
-            onDismiss = { isAppSettingsOpen = false },
-            onApplicationLogsClick = {
+            onDismiss = {
                 isAppSettingsOpen = false
+                applyPendingSplitTunnelRestart()
+            },
+            onApplicationLogsClick = {
                 logsOpenRequest += 1
             },
             onModeSelected = { mode ->
@@ -156,6 +181,14 @@ fun AndroidMainScreen(
                 if (homeState.isVpnConnected && connectionMode == AndroidConnectionMode.Proxy) {
                     viewModel.restartVpnIfRunning()
                 }
+            },
+            onSplitTunnelModeSelected = { mode: AndroidSplitTunnelMode ->
+                vpnManager.selectSplitTunnelMode(mode)
+                markSplitTunnelChanged()
+            },
+            onSplitTunnelAppToggled = { list: AndroidSplitTunnelList, packageName: String ->
+                vpnManager.toggleSplitTunnelApp(list, packageName)
+                markSplitTunnelChanged()
             }
         )
     }

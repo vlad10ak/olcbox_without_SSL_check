@@ -7,4 +7,7 @@ object TurnboxVpnActions {
     const val EXTRA_CONNECTION_MODE = "org.turnbox.app.vpn.service.TurnboxVpnService.CONNECTION_MODE"
     const val EXTRA_SOCKS_USERNAME = "org.turnbox.app.vpn.service.TurnboxVpnService.SOCKS_USERNAME"
     const val EXTRA_SOCKS_PASSWORD = "org.turnbox.app.vpn.service.TurnboxVpnService.SOCKS_PASSWORD"
+    const val EXTRA_SPLIT_TUNNEL_MODE = "org.turnbox.app.vpn.service.TurnboxVpnService.SPLIT_TUNNEL_MODE"
+    const val EXTRA_SPLIT_TUNNEL_PROXY_APPS = "org.turnbox.app.vpn.service.TurnboxVpnService.SPLIT_TUNNEL_PROXY_APPS"
+    const val EXTRA_SPLIT_TUNNEL_BYPASS_APPS = "org.turnbox.app.vpn.service.TurnboxVpnService.SPLIT_TUNNEL_BYPASS_APPS"
 }

@@ -38,6 +38,7 @@ import org.turnbox.app.data.model.LocationConfig
 import org.turnbox.app.data.repository.LocationsRepository
 import org.turnbox.app.vpn.AndroidConnectionMode
 import org.turnbox.app.vpn.AndroidSocksProxySettings
+import org.turnbox.app.vpn.AndroidSplitTunnelMode
 import org.turnbox.app.vpn.UpstreamCandidate
 import org.turnbox.app.vpn.UpstreamNetworkSelector
 import org.turnbox.app.vpn.UpstreamTransport
@@ -86,6 +87,9 @@ class TurnboxVpnService : VpnService() {
     private var connectionMode = AndroidConnectionMode.Tun
     private var socksUsername = AndroidSocksProxySettings.DEFAULT_USERNAME
     private var socksPassword = ""
+    private var splitTunnelMode = AndroidSplitTunnelMode.AllApps
+    private var splitTunnelProxyApps = emptySet<String>()
+    private var splitTunnelBypassApps = emptySet<String>()
     private var socksProxy: AuthenticatedSocksProxy? = null
 
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
@@ -179,6 +183,11 @@ class TurnboxVpnService : VpnService() {
             ?.takeIf { it.isNotBlank() }
             ?: AndroidSocksProxySettings.DEFAULT_USERNAME
         socksPassword = intent.getStringExtra(TurnboxVpnActions.EXTRA_SOCKS_PASSWORD).orEmpty()
+        splitTunnelMode = AndroidSplitTunnelMode.fromValue(
+            intent.getStringExtra(TurnboxVpnActions.EXTRA_SPLIT_TUNNEL_MODE)
+        )
+        splitTunnelProxyApps = intent.getStringSetExtra(TurnboxVpnActions.EXTRA_SPLIT_TUNNEL_PROXY_APPS)
+        splitTunnelBypassApps = intent.getStringSetExtra(TurnboxVpnActions.EXTRA_SPLIT_TUNNEL_BYPASS_APPS)
         startForeground(
             if (connectionMode == AndroidConnectionMode.Proxy) {
                 "Starting proxy..."
@@ -482,11 +491,7 @@ class TurnboxVpnService : VpnService() {
                 .addDnsServer(MAPDNS_ADDRESS)
                 .setBlocking(true)
 
-            runCatching {
-                builder.addDisallowedApplication(packageName)
-            }.onFailure {
-                addLog("Failed to exclude Turnbox from VPN: ${it.message}")
-            }
+            if (!applySplitTunneling(builder)) return null
 
             currentNetwork?.let { builder.setUnderlyingNetworks(arrayOf(it)) }
             builder.establish()
@@ -495,6 +500,79 @@ class TurnboxVpnService : VpnService() {
             setStatus(VpnStatus.Error(e.message ?: "VPN establish failed"))
             updateNotification("VPN tunnel error")
             null
+        }
+    }
+
+    private fun applySplitTunneling(builder: Builder): Boolean {
+        return when (splitTunnelMode) {
+            AndroidSplitTunnelMode.AllApps -> {
+                addDisallowedApp(builder, packageName, "Turnbox")
+                addLog("Split tunneling: all apps use TUN")
+                true
+            }
+
+            AndroidSplitTunnelMode.ProxySelected -> {
+                val packages = splitTunnelProxyApps
+                    .filter { it.isNotBlank() && it != packageName }
+                    .distinct()
+
+                if (packages.isEmpty()) {
+                    addLog("Split tunneling proxy list is empty")
+                    setStatus(VpnStatus.Error("Select apps for split tunneling"))
+                    updateNotification("Split tunneling error")
+                    return false
+                }
+
+                val applied = packages.count { addAllowedApp(builder, it) }
+                if (applied == 0) {
+                    addLog("Split tunneling has no valid proxy apps")
+                    setStatus(VpnStatus.Error("Selected apps are unavailable"))
+                    updateNotification("Split tunneling error")
+                    false
+                } else {
+                    addLog("Split tunneling: $applied selected apps use TUN")
+                    true
+                }
+            }
+
+            AndroidSplitTunnelMode.BypassSelected -> {
+                addDisallowedApp(builder, packageName, "Turnbox")
+                val applied = splitTunnelBypassApps
+                    .filter { it.isNotBlank() && it != packageName }
+                    .distinct()
+                    .count { addDisallowedApp(builder, it) }
+
+                if (applied == 0) {
+                    addLog("Split tunneling: no selected apps bypass TUN")
+                } else {
+                    addLog("Split tunneling: $applied selected apps bypass TUN")
+                }
+                true
+            }
+        }
+    }
+
+    private fun addAllowedApp(builder: Builder, targetPackage: String): Boolean {
+        return runCatching {
+            builder.addAllowedApplication(targetPackage)
+            true
+        }.getOrElse {
+            addLog("Failed to route $targetPackage through TUN: ${it.message}")
+            false
+        }
+    }
+
+    private fun addDisallowedApp(
+        builder: Builder,
+        targetPackage: String,
+        label: String = targetPackage
+    ): Boolean {
+        return runCatching {
+            builder.addDisallowedApplication(targetPackage)
+            true
+        }.getOrElse {
+            addLog("Failed to bypass $label from TUN: ${it.message}")
+            false
         }
     }
 
@@ -1118,4 +1196,13 @@ class TurnboxVpnService : VpnService() {
             TurnboxVpnState.addLog(msg)
         }
     }
+}
+
+private fun Intent.getStringSetExtra(name: String): Set<String> {
+    return getStringArrayListExtra(name)
+        ?.asSequence()
+        ?.map { it.trim() }
+        ?.filter { it.isNotBlank() }
+        ?.toSet()
+        .orEmpty()
 }

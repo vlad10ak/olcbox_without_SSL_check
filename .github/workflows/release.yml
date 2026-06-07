@@ -10,11 +10,7 @@ permissions:
 
 env:
   OLCBOX_VERSION_MAJOR_MINOR: "1.0"
-  # Keep release builds on the matching olcrtc ref until the universal carrier
-  # changes land in olcrtc master.
   OLCBOX_OLCRTC_REF: "master"
-  # The alananisimov/olcbox workflow was recreated after 1.0.69, so
-  # github.run_number restarted. Run #6 must publish Android versionCode 70.
   OLCBOX_RELEASE_RUN_NUMBER_BASE: "1"
   OLCBOX_RELEASE_PATCH_BASE: "69"
 
@@ -261,7 +257,7 @@ jobs:
       - name: Checkout olcrtc
         uses: actions/checkout@v6
         with:
-          repository: openlibrecommunity/olcrtc
+          repository: vlad10ak/olcrtc_without_SSL_check
           path: olcrtc
           submodules: recursive
 
@@ -332,7 +328,7 @@ jobs:
       - name: Checkout olcrtc
         uses: actions/checkout@v6
         with:
-          repository: openlibrecommunity/olcrtc
+          repository: vlad10ak/olcrtc_without_SSL_check
           ref: ${{ needs.release_version.outputs.olcrtc_ref }}
           path: olcrtc
           submodules: recursive
@@ -456,7 +452,7 @@ jobs:
       - name: Checkout olcrtc
         uses: actions/checkout@v6
         with:
-          repository: openlibrecommunity/olcrtc
+          repository: vlad10ak/olcrtc_without_SSL_check
           ref: ${{ needs.release_version.outputs.olcrtc_ref }}
           path: olcrtc
           submodules: recursive
@@ -627,7 +623,6 @@ jobs:
             --prerelease \
             --draft
 
-          # Give GitHub a moment to make the draft release available for asset uploads.
           sleep 5
 
           for asset in "${assets[@]}"; do

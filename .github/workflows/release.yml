@@ -73,7 +73,7 @@ jobs:
       - name: Checkout olcrtc
         uses: actions/checkout@v6
         with:
-          repository: openlibrecommunity/olcrtc
+          repository: vlad10ak/olcrtc_without_SSL_check
           ref: ${{ needs.release_version.outputs.olcrtc_ref }}
           path: olcrtc
           submodules: recursive
@@ -209,7 +209,7 @@ jobs:
       - name: Checkout olcrtc
         uses: actions/checkout@v6
         with:
-          repository: openlibrecommunity/olcrtc
+          ref: ${{ needs.release_version.outputs.olcrtc_ref }}
           ref: ${{ needs.release_version.outputs.olcrtc_ref }}
           path: olcrtc
           submodules: recursive
@@ -263,7 +263,6 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: openlibrecommunity/olcrtc
-          ref: ${{ needs.release_version.outputs.olcrtc_ref }}
           path: olcrtc
           submodules: recursive
 

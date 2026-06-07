@@ -209,8 +209,7 @@ jobs:
       - name: Checkout olcrtc
         uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release_version.outputs.olcrtc_ref }}
-          ref: ${{ needs.release_version.outputs.olcrtc_ref }}
+          repository: vlad10ak/olcrtc_without_SSL_check
           path: olcrtc
           submodules: recursive
 
